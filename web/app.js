@@ -1,3 +1,4 @@
+import { lessons } from './lessons.js';
 import { diagnose, generate } from '../projects/network-detective/index.js';
 import { topology, ping } from '../projects/mini-internet/index.js';
 import { simulateVideo } from '../projects/video-call/index.js';
@@ -35,6 +36,38 @@ const labs = {
   } }
 };
 let lastResult, animation;
+let baseline = null;
+function renderLesson(key) {
+  const lesson = lessons[key], container = $('lesson');
+  container.replaceChildren();
+  const add = (tag, text) => { const node = document.createElement(tag); node.textContent = text; container.append(node); return node; };
+  add('p', 'GUIDED INVESTIGATION · 20–30 MINUTES').className = 'eyebrow';
+  add('h2', lesson.problem);
+  add('p', 'Learning goal: ' + lesson.goal);
+  const steps = add('ol', '');
+  lesson.steps.forEach(text => { const li = document.createElement('li'); li.textContent = text; steps.append(li); });
+  add('label', 'Before your next run: what do you predict, and why?').htmlFor = 'prediction';
+  const prediction = add('textarea', ''); prediction.id = 'prediction'; prediction.rows = 2;
+  add('p', 'Explain: ' + lesson.question);
+  add('p', 'A strong submission: ' + lesson.rubric);
+  add('p', 'Model boundary: ' + lesson.limit).className = 'muted';
+  if (key === 'vpn') for (const file of ['Main', 'Packet', 'VPNClient', 'VPNNetwork']) {
+    const link = add('a', file + '.java'); link.href = 'projects/mini-vpn/src/' + file + '.java'; link.download = file + '.java'; link.className = 'source-link';
+  }
+}
+function compareRun(view, options) {
+  const area = $('comparison'); area.replaceChildren();
+  const heading = document.createElement('h3'); heading.textContent = 'Compare your evidence'; area.append(heading);
+  if (baseline) {
+    const changes = Object.keys(options).filter(key => JSON.stringify(options[key]) !== JSON.stringify(baseline.options[key]));
+    const note = document.createElement('p'); note.textContent = changes.length ? 'Changed controls: ' + changes.join(', ') + (changes.length > 1 ? '. Several variables changed; isolate one before claiming a cause.' : '. Explain how this change produced the measured result.') : 'No controls changed since the baseline. Change one variable and run again.'; area.append(note);
+    const table = document.createElement('table');
+    const row = values => { const tr = document.createElement('tr'); values.forEach((value, i) => { const cell = document.createElement(i === 0 ? 'th' : 'td'); cell.textContent = value; tr.append(cell); }); table.append(tr); };
+    row(['Measurement', 'Baseline', 'Current']);
+    view.metrics.forEach(([value, label], i) => row([label, baseline.metrics[i][0], value])); area.append(table);
+  } else { const text = document.createElement('p'); text.textContent = 'Save this run, change one control, and run again to compare measurements side by side.'; area.append(text); }
+  const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Use this run as baseline'; save.onclick = () => { baseline = { options: structuredClone(options), metrics: structuredClone(view.metrics) }; compareRun(view, options); }; area.append(save);
+}
 function draw(series) {
   const canvas = $('chart'), ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
@@ -71,6 +104,13 @@ function animate(kind, result) {
 function mount() {
   cancelAnimationFrame(animation); document.getElementById('animation')?.remove();
   const key = location.hash.slice(1) in labs ? location.hash.slice(1) : 'detective', lab = labs[key];
+  baseline = null; renderLesson(key); $('comparison').replaceChildren();
+  $('reflection').value = localStorage.getItem('network-lab-reflection-' + key) || '';
+  $('reflection').oninput = () => localStorage.setItem('network-lab-reflection-' + key, $('reflection').value);
+  $('download-notebook').onclick = () => {
+    const report = [lab.title, 'Learning goal: ' + lessons[key].goal, 'Prediction: ' + $('prediction').value, 'Baseline: ' + JSON.stringify(baseline, null, 2), 'Current run: ' + JSON.stringify(lastResult, null, 2), 'Explanation: ' + $('reflection').value, 'Model boundary: ' + lessons[key].limit].join('\n\n');
+    const url = URL.createObjectURL(new Blob([report], { type: 'text/plain' })); const link = document.createElement('a'); link.href = url; link.download = key + '-notebook.txt'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   $('title').textContent = lab.title; $('description').textContent = lab.description; $('guide').textContent = lab.guide;
   for (const link of $('nav').children) link.classList.toggle('active', link.hash === '#' + key);
   $('controls').replaceChildren();
@@ -92,9 +132,10 @@ function mount() {
       $('error').textContent = ''; $('metrics').replaceChildren();
       for (const [value, label] of view.metrics) { const div = document.createElement('div'); div.className = 'metric'; const strong = document.createElement('strong'), span = document.createElement('span'); strong.textContent = value; span.textContent = label; div.append(strong, span); $('metrics').append(div); }
       const { timeline, samples, ...summary } = view.result; $('output').textContent = JSON.stringify(summary, null, 2);
+      compareRun(view, options);
       draw(view.series); $('chart-note').textContent = view.note;
       if (view.animate) animate(view.animate, view.result);
-    } catch (error) { lastResult = null; $('error').textContent = error.message; $('metrics').replaceChildren(); $('output').textContent = ''; draw([]); $('chart-note').textContent = ''; }
+    } catch (error) { lastResult = null; $('comparison').replaceChildren(); $('error').textContent = error.message; $('metrics').replaceChildren(); $('output').textContent = ''; draw([]); $('chart-note').textContent = ''; }
   };
   $('controls').onsubmit = event => { event.preventDefault(); run(); }; run();
 }
